@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SAIKYO GAME</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #0b0f1a;
+      color: #e6e9ff;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      overflow: hidden;
+    }
+    #ui {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      background: rgba(20, 26, 60, 0.75);
+      backdrop-filter: blur(8px);
+      border-radius: 14px;
+      padding: 10px 14px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.35);
+    }
+    #ui div { font-size: 14px; line-height: 1.4; }
+    #center {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      pointer-events: none;
+    }
+    #hint {
+      background: rgba(0,0,0,.55);
+      padding: 10px 16px;
+      border-radius: 999px;
+      font-size: 14px;
+      opacity: .85;
+    }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div id="score">Score: 0</div>
+    <div id="hp">HP: 100</div>
+    <div id="level">Level: 1</div>
+  </div>
+  <div id="center"><div id="hint">WASD / ←→↑↓ 移動 ・ クリック / スペース 攻撃</div></div>
+  <canvas id="game"></canvas>
+
+  <script>
+    // ================================
+    // SAIKYO GAME ENGINE (NO LIBS)
+    // ================================
+
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    const keys = {};
+    window.addEventListener('keydown', e => keys[e.key] = true);
+    window.addEventListener('keyup', e => keys[e.key] = false);
+
+    const mouse = { x: 0, y: 0, down: false };
+    window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+    window.addEventListener('mousedown', () => mouse.down = true);
+    window.addEventListener('mouseup', () => mouse.down = false);
+
+    const rand = (a,b)=>Math.random()*(b-a)+a;
+
+    const player = {
+      x: innerWidth/2,
+      y: innerHeight/2,
+      r: 14,
+      speed: 4.2,
+      hp: 100,
+      maxHp: 100,
+      dmg: 12
+    };
+
+    let score = 0;
+    let level = 1;
+    let enemies = [];
+    let bullets = [];
+    let lastShot = 0;
+
+    function spawnEnemy() {
+      const side = Math.floor(Math.random()*4);
+      let x, y;
+      if (side === 0) { x = -40; y = rand(0, canvas.height); }
+      if (side === 1) { x = canvas.width+40; y = rand(0, canvas.height); }
+      if (side === 2) { x = rand(0, canvas.width); y = -40; }
+      if (side === 3) { x = rand(0, canvas.width); y = canvas.height+40; }
+      enemies.push({
+        x, y,
+        r: rand(10, 20),
+        hp: 20 + level * 6,
+        speed: 1.2 + level * 0.15
+      });
+    }
+
+    function shoot() {
+      const now = performance.now();
+      if (now - lastShot < 120) return;
+      lastShot = now;
+      const dx = mouse.x - player.x;
+      const dy = mouse.y - player.y;
+      const len = Math.hypot(dx, dy) || 1;
+      bullets.push({
+        x: player.x,
+        y: player.y,
+        vx: dx/len * 10,
+        vy: dy/len * 10,
+        r: 4
+      });
+    }
+
+    function update() {
+      // Move player
+      if (keys['w'] || keys['ArrowUp']) player.y -= player.speed;
+      if (keys['s'] || keys['ArrowDown']) player.y += player.speed;
+      if (keys['a'] || keys['ArrowLeft']) player.x -= player.speed;
+      if (keys['d'] || keys['ArrowRight']) player.x += player.speed;
+
+      player.x = Math.max(player.r, Math.min(canvas.width-player.r, player.x));
+      player.y = Math.max(player.r, Math.min(canvas.height-player.r, player.y));
+
+      if (mouse.down || keys[' ']) shoot();
+
+      // Bullets
+      bullets.forEach(b => { b.x += b.vx; b.y += b.vy; });
+      bullets = bullets.filter(b => b.x>-50 && b.y>-50 && b.x<canvas.width+50 && b.y<canvas.height+50);
+
+      // Enemies
+      enemies.forEach(e => {
+        const dx = player.x - e.x;
+        const dy = player.y - e.y;
+        const d = Math.hypot(dx, dy) || 1;
+        e.x += dx/d * e.speed;
+        e.y += dy/d * e.speed;
+
+        if (d < e.r + player.r) {
+          player.hp -= 0.4;
+        }
+      });
+
+      // Collisions
+      enemies.forEach(e => {
+        bullets.forEach(b => {
+          const d = Math.hypot(e.x-b.x, e.y-b.y);
+          if (d < e.r + b.r) {
+            e.hp -= player.dmg;
+            b.dead = true;
+          }
+        });
+      });
+
+      bullets = bullets.filter(b => !b.dead);
+      enemies = enemies.filter(e => {
+        if (e.hp <= 0) {
+          score += 10;
+          return false;
+        }
+        return true;
+      });
+
+      // Level up
+      if (score > level * 300) {
+        level++;
+        player.dmg += 2;
+        player.maxHp += 10;
+        player.hp = Math.min(player.maxHp, player.hp + 20);
+      }
+
+      if (Math.random() < 0.02 + level * 0.002) spawnEnemy();
+
+      // UI
+      document.getElementById('score').textContent = 'Score: ' + score;
+      document.getElementById('hp').textContent = 'HP: ' + Math.max(0, Math.floor(player.hp));
+      document.getElementById('level').textContent = 'Level: ' + level;
+
+      if (player.hp <= 0) {
+        alert('GAME OVER\nScore: ' + score);
+        location.reload();
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+
+      // Player
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, player.r, 0, Math.PI*2);
+      ctx.fillStyle = '#6cf';
+      ctx.fill();
+
+      // Bullets
+      ctx.fillStyle = '#fff';
+      bullets.forEach(b => {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+        ctx.fill();
+      });
+
+      // Enemies
+      enemies.forEach(e => {
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, e.r, 0, Math.PI*2);
+        ctx.fillStyle = '#ff5c7a';
+        ctx.fill();
+      });
+    }
+
+    function loop() {
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    loop();
+  </script>
+</body>
+</html>
